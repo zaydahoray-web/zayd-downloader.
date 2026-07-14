@@ -1,10 +1,13 @@
 import os
+import sys
 from flask import Flask, request, render_template_string, send_file
 import yt_dlp
 
 app = Flask(__name__)
 
-# Web Interface with English Layout & Ads space
+# تحديد مسار تخزين مؤقت متوافق مع خوادم Vercel السحابية
+os.environ['HOME'] = '/tmp'
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -39,13 +42,16 @@ def index():
 @app.route('/download', methods=['POST'])
 def download():
     video_url = request.form.get('url')
-    # إعدادات خاصة ومحسنة لتشغيل التحميل على السيرفرات السحابية بدون قيود
+    
+    # إعدادات مخصصة لتفادي جدران الحماية وتحميل الفيديو في الذاكرة المؤقتة للسيرفر السحابي
     ydl_opts = {
-        'format': 'best', 
-        'outtmpl': '/tmp/%(title)s.%(ext)s', # السيرفرات السحابية تسمح بالكتابة فقط داخل مجلد tmp مؤقتاً
-        'quiet': True,
+        'format': 'best',
+        'outtmpl': '/tmp/%(title)s.%(ext)s',
+        'cachedir': False,
         'no_warnings': True,
+        'quiet': True
     }
+    
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
@@ -54,8 +60,9 @@ def download():
     except Exception as e:
         return f"Download Error: {str(e)}"
 
-# مخصص لتشغيل التطبيق على منصة Vercel بنجاح
+# تعيين التطبيق للخادم السحابي
 application = app
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
+    
