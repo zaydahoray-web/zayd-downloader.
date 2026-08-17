@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>فاتورة حرارية</title>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background-color: #f0f2f5; margin: 0; padding: 10px; }
+        
+        #auth-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #1a1a1a; display: flex; align-items: center; justify-content: center; z-index: 99999; }
+        .auth-card { background: #fff; padding: 25px; border-radius: 12px; text-align: center; width: 90%; max-width: 350px; }
+        .auth-card input { width: 100%; padding: 10px; margin: 12px 0; border: 1px solid #ccc; border-radius: 6px; text-align: center; font-size: 16px; }
+        .auth-card button { width: 100%; padding: 10px; background: #28a745; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+
+        .app-content { display: block; }
+        .form-container { max-width: 480px; margin: 0 auto 20px auto; background: #fff; padding: 12px; border-radius: 8px; }
+        .form-group { margin-bottom: 10px; }
+        .form-group label { display: block; font-size: 13px; margin-bottom: 4px; font-weight: bold; }
+        .form-group input, .form-group select { width: 100%; padding: 7px; border: 1px solid #ccc; border-radius: 4px; }
+        
+        .sync-status { font-size: 11px; text-align: center; padding: 6px; margin-bottom: 8px; border-radius: 4px; background: #e2e3e5; font-weight: bold; }
+        .camera-box { text-align: center; background: #e3f2fd; padding: 8px; border-radius: 6px; margin-bottom: 10px; }
+        #reader { width: 100%; max-width: 350px; margin: 8px auto; display: none; background: #000; }
+        .btn-camera { background: #0288d1; color: white; border: none; padding: 10px; border-radius: 4px; font-weight: bold; width: 100%; }
+        .btn-camera-add { background: #6f42c1; color: white; border: none; padding: 8px; border-radius: 4px; font-weight: bold; width: 100%; margin-bottom: 6px; }
+        
+        .search-box { margin-bottom: 10px; background: #fff3cd; padding: 8px; border-radius: 6px; }
+        .search-box input { width: 100%; border: 1px solid #ffc107; padding: 6px; border-radius: 4px; }
+
+        .add-product-box { background: #e9ecef; padding: 10px; border-radius: 6px; margin-bottom: 10px; }
+        .add-product-inputs { display: flex; gap: 4px; margin-top: 6px; }
+        .add-product-inputs input { padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
+        .btn-add-item { background: #28a745; color: white; border: none; padding: 6px 10px; border-radius: 4px; font-weight: bold; cursor: pointer; }
+
+        .products-list { max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 4px; background: #fafafa; }
+        .product-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 4px; border-bottom: 1px solid #eee; gap: 4px; }
+        
+        .product-inputs { display: flex; gap: 3px; flex: 1; }
+        .product-inputs input { padding: 5px 3px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; }
+        .product-inputs input.code-input { width: 40px; text-align: center; background: #fffde7; font-weight: bold; }
+        .product-inputs input.name-input { flex: 1; }
+        .product-inputs input.price-input { width: 40px; text-align: center; }
+        
+        .qty-control { display: flex; align-items: center; gap: 2px; }
+        .qty-btn { width: 24px; height: 24px; background: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        .qty-btn.minus { background: #dc3545; }
+        .qty-input { width: 35px; text-align: center; font-weight: bold; border: 1px solid #ccc; }
+
+        .btn-delete { background: #dc3545; color: white; border: none; border-radius: 4px; width: 28px; height: 28px; cursor: pointer; }
+        .btn-print { background: #17a2b8; width: 100%; padding: 10px; color: white; border: none; border-radius: 4px; font-weight: bold; margin-top: 10px; cursor: pointer; }
+
+        .receipt { max-width: 80mm; background: #fff; margin: 0 auto; padding: 10px; border: 1px dashed #ccc; font-family: monospace; font-size: 12px; }
+        .receipt .center { text-align: center; }
+        .receipt .bold { font-weight: bold; }
+        .receipt .divider { border-top: 1px dashed #000; margin: 8px 0; }
+        .receipt table { width: 100%; border-collapse: collapse; }
+        .receipt th, .receipt td { text-align: right; padding: 4px 0; }
+
+        @media print {
+            body { background: none; padding: 0; }
+            .form-container, #auth-overlay { display: none !important; }
+            .receipt { border: none; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="auth-overlay">
+        <div class="auth-card">
+            <h3>🔒 تسجيل الدخول</h3>
+            <p style="font-size: 12px; color: #666;">أدخل كلمة المرور للوصول للنظام</p>
+            <input type="password" id="pass-input" placeholder="كلمة المرور">
+            <button type="button" id="login-btn">دخول النظام</button>
+            <div id="pass-error" style="color: red; font-size: 12px; margin-top: 8px; display: none;">كلمة المرور غير صحيحة!</div>
+        </div>
+    </div>
+
+    <div class="app-content" id="main-app">
+        <div class="form-container">
+            <h3 style="margin: 0 0 6px 0; text-align: center;">إدارة الفاتورة الحرارية</h3>
+
+            <div class="sync-status" id="sync-status">🔄 جاري الاتصال...</div>
+
+            <div class="form-group">
+                <label>اسم المحل:</label>
+                <input type="text" id="in-store" value="تجارا" onchange="updateHeaderWithAuth('store', this)">
+            </div>
+            <div class="form-group">
+                <label>رقم الهاتف:</label>
+                <input type="text" id="in-phone" value="0600000000" onchange="updateHeaderWithAuth('phone', this)">
+            </div>
+            <div class="form-group">
+                <label>العملة:</label>
+                <select id="in-currency" onchange="saveHeaderToStorage()">
+                    <option value="درهم">درهم (DH)</option>
+                    <option value="ريال">ريال</option>
+                    <option value="$">دولار ($)</option>
+                    <option value="€">يورو (€)</option>
+                </select>
+            </div>
+
+            <div class="camera-box">
+                <button type="button" class="btn-camera" id="toggle-cam-btn" onclick="toggleCamera('scan')">📷 مسح الباركود للبيع</button>
+                <div id="reader"></div>
+            </div>
+
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="🔍 بحث عن مادة..." oninput="filterProducts()">
+            </div>
+
+            <div class="add-product-box">
+                <button type="button" class="btn-camera-add" onclick="toggleCamera('add')">📸 مسح باركود لمادة جديدة</button>
+                <div class="add-product-inputs">
+                    <input type="text" id="new-code" placeholder="الرمز" style="width: 65px;">
+                    <input type="text" id="new-name" placeholder="اسم المادة" style="flex: 1;">
+                    <input type="number" id="new-price" placeholder="الثمن" style="width: 50px;">
+                    <button type="button" class="btn-add-item" onclick="addNewProduct()">إضافة</button>
+                </div>
+            </div>
+
+            <div class="products-list" id="products-container"></div>
+            <button type="button" class="btn-print" onclick="window.print()">طباعة الفاتورة</button>
+        </div>
+
+        <div class="receipt">
+            <div class="center bold" id="out-store">تجارا</div>
+            <div class="center" id="out-phone">الهاتف: 0600000000</div>
+            <div class="center" id="out-date">التاريخ والوقت: </div>
+            <div class="divider"></div>
+            <table>
+                <thead>
+                    <tr><th>المادة</th><th>الكمية</th><th>الثمن</th><th>الإجمالي</th></tr>
+                </thead>
+                <tbody id="items-table"></tbody>
+            </table>
+            <div class="divider"></div>
+            <div style="display: flex; justify-content: space-between;" class="bold">
+                <span>المجموع الكلي:</span>
+                <span id="out-grand-total">0 درهم</span>
+            </div>
+            <div class="divider"></div>
+            <div class="center">شكراً لزيارتكم!</div>
+        </div>
+    </div>
+
+    <script>
+        const SITE_LOGIN_PASS = "123456789";
+        let lastValidStore = "تجارا";
+        let lastValidPhone = "0600000000";
+        let lastScannedCode = null;
+        let lastScanTime = 0;
+
+        function playBeepSound() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = "sine";
+                osc.frequency.value = 1000;
+                gain.gain.value = 0.1;
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.15);
+            } catch (e) {
+                console.log("Audio play error", e);
+            }
+        }
+
+        function getHourlyEditPassword() {
+            const now = new Date();
+            const hour = String(now.getHours()).padStart(2, '0');
+            return `27092006${hour}`;
+        }
+
+        function getCurrentHourKey() {
+            const now = new Date();
+            return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}-${now.getHours()}`;
+        }
+
+        function verifyEditPassword() {
+            const currentHourKey = getCurrentHourKey();
+            const savedHourKey = localStorage.getItem('edit_verified_hour');
+
+            if (savedHourKey === currentHourKey) {
+                return true;
+            }
+
+            const currentPass = getHourlyEditPassword();
+            const inputPass = prompt("🔐 أدخل كلمة مرور التعديل لهذه الساعة (مرة واحدة في الساعة):");
+
+            if (inputPass === currentPass) {
+                localStorage.setItem('edit_verified_hour', currentHourKey);
+                return true;
+            } else {
+                alert("❌ كلمة المرور غير صحيحة!");
+                return false;
+            }
+        }
+
+        document.getElementById('login-btn').onclick = function() {
+            const val = document.getElementById('pass-input').value.trim();
+            if (val === SITE_LOGIN_PASS) {
+                document.getElementById('auth-overlay').style.display = 'none';
+                
+                const now = new Date();
+                const dateStr = now.toLocaleDateString('ar-MA');
+                const timeStr = now.toLocaleTimeString('ar-MA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                document.getElementById('out-date').innerText = `التاريخ: ${dateStr} - ${timeStr}`;
+
+                initApp();
+            } else {
+                document.getElementById('pass-error').style.display = 'block';
+            }
+        };
+
+        let db, productsRef, productsList = [], quantities = {}, html5QrCode, isCameraActive = false, currentMode = 'scan';
+
+        function initApp() {
+            if (!firebase.apps.length) {
+                firebase.initializeApp({ databaseURL: "https://tjara-b5ed7-default-rtdb.firebaseio.com" });
+            }
+            db = firebase.database();
+            productsRef = db.ref('productsList');
+
+            productsRef.on('value', (snapshot) => {
+                const data = snapshot.val();
+                productsList = data ? (Array.isArray(data) ? data : Object.values(data)) : [];
+                filterProducts();
+                document.getElementById('sync-status').innerText = "🌐 متصل بالسحابة";
+                document.getElementById('sync-status').style.background = "#d4edda";
+            });
+            saveHeaderToStorage();
+        }
+
+        function saveToCloud() { if (productsRef) productsRef.set(productsList); }
+
+        function updateHeaderWithAuth(type, inputElem) {
+            if (!verifyEditPassword()) {
+                if (type === 'store') inputElem.value = lastValidStore;
+                if (type === 'phone') inputElem.value = lastValidPhone;
+                return;
+            }
+            if (type === 'store') lastValidStore = inputElem.value;
+            if (type === 'phone') lastValidPhone = inputElem.value;
+            saveHeaderToStorage();
+        }
+
+        function saveHeaderToStorage() {
+            document.getElementById('out-store').innerText = document.getElementById('in-store').value;
+            document.getElementById('out-phone').innerText = "الهاتف: " + document.getElementById('in-phone').value;
+            updateReceiptTable();
+        }
+
+        function renderProductsMenu(list = productsList) {
+            const container = document.getElementById('products-container');
+            container.innerHTML = list.length === 0 ? '<div style="text-align:center;color:#888;">لا توجد مواد</div>' : '';
+
+            list.forEach(product => {
+                quantities[product.id] = quantities[product.id] || 0;
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'product-item';
+                itemDiv.innerHTML = `
+                    <button type="button" class="btn-delete" onclick="deleteProduct(${product.id})">🗑️</button>
+                    <div class="product-inputs">
+                        <input type="text" class="code-input" value="${product.code || ''}" onchange="updateProductData(${product.id}, 'code', this)">
+                        <input type="text" class="name-input" value="${product.name || ''}" onchange="updateProductData(${product.id}, 'name', this)">
+                        <input type="number" class="price-input" value="${product.price || 0}" onchange="updateProductData(${product.id}, 'price', this)">
+                    </div>
+                    <div class="qty-control">
+                        <button type="button" class="qty-btn minus" onclick="changeQty(${product.id}, -1)">-</button>
+                        <input type="number" class="qty-input" id="qty-${product.id}" value="${quantities[product.id]}" oninput="setQty(${product.id}, this.value)">
+                        <button type="button" class="qty-btn" onclick="changeQty(${product.id}, 1)">+</button>
+                    </div>
+                `;
+                container.appendChild(itemDiv);
+            });
+        }
+
+        function deleteProduct(id) {
+            if (!verifyEditPassword()) return;
+            productsList = productsList.filter(p => p.id !== id);
+            delete quantities[id];
+            saveToCloud(); updateReceiptTable();
+        }
+
+        function filterProducts() {
+            const q = document.getElementById('search-input').value.toLowerCase().trim();
+            renderProductsMenu(productsList.filter(p => (p.name && p.name.toLowerCase().includes(q)) || (p.code && p.code.toLowerCase().includes(q))));
+        }
+
+        function toggleCamera(mode) {
+            if (isCameraActive) { html5QrCode.stop().then(() => { if(currentMode !== mode) startCamera(mode); else isCameraActive = false; }); }
+            else startCamera(mode);
+        }
+
+        function startCamera(mode) {
+            currentMode = mode;
+            document.getElementById('reader').style.display = 'block';
+            html5QrCode = new Html5Qrcode("reader");
+
+            const config = { fps: 25, qrbox: { width: 280, height: 280 } };
+
+            html5QrCode.start({ facingMode: "environment" }, config, (code) => {
+                const now = Date.now();
+                if (code === lastScannedCode && (now - lastScanTime) < 1500) {
+                    return;
+                }
+                
+                lastScannedCode = code;
+                lastScanTime = now;
+                playBeepSound();
+
+                if (currentMode === 'add') {
+                    document.getElementById('new-code').value = code;
+                    html5QrCode.stop(); 
+                    document.getElementById('reader').style.display = 'none'; 
+                    isCameraActive = false;
+                } else {
+                    const p = productsList.find(x => x.code === code);
+                    if (p) changeQty(p.id, 1);
+                }
+            }).then(() => isCameraActive = true);
+        }
+
+        function updateProductData(id, field, inputElem) {
+            if (!verifyEditPassword()) {
+                filterProducts();
+                return;
+            }
+            const p = productsList.find(x => x.id === id);
+            if (p) { 
+                p[field] = field === 'price' ? (parseFloat(inputElem.value) || 0) : inputElem.value; 
+                saveToCloud(); 
+                updateReceiptTable(); 
+            }
+        }
+
+        function addNewProduct() {
+            const name = document.getElementById('new-name').value.trim();
+            if (!name) return alert("أدخل اسم المادة");
+            if (!verifyEditPassword()) return;
+
+            productsList.push({ 
+                id: Date.now(), 
+                code: document.getElementById('new-code').value.trim() || (productsList.length + 101).toString(), 
+                name: name, 
+                price: parseFloat(document.getElementById('new-price').value) || 0 
+            });
+            document.getElementById('new-code').value = ''; 
+            document.getElementById('new-name').value = ''; 
+            document.getElementById('new-price').value = '';
+            saveToCloud(); 
+            updateReceiptTable();
+        }
+
+        function changeQty(id, amt) {
+            quantities[id] = Math.max(0, (quantities[id] || 0) + amt);
+            const el = document.getElementById(`qty-${id}`);
+            if (el) el.value = quantities[id];
+            updateReceiptTable();
+        }
+
+        function setQty(id, val) {
+            quantities[id] = Math.max(0, parseInt(val, 10) || 0);
+            updateReceiptTable();
+        }
+
+        function updateReceiptTable() {
+            const now = new Date();
+            const dateStr = now.toLocaleDateString('ar-MA');
+            const timeStr = now.toLocaleTimeString('ar-MA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            document.getElementById('out-date').innerText = `التاريخ: ${dateStr} - ${timeStr}`;
+
+            const body = document.getElementById('items-table');
+            body.innerHTML = '';
+            let total = 0;
+            productsList.forEach(p => {
+                const q = quantities[p.id] || 0;
+                if (q > 0) {
+                    const sum = q * (p.price || 0); total += sum;
+                    body.innerHTML += `<tr><td>${p.name || ''}</td><td>${q}</td><td>${p.price || 0}</td><td>${sum}</td></tr>`;
+                }
+            });
+            document.getElementById('out-grand-total').innerText = total + " " + document.getElementById('in-currency').value;
+        }
+    </script>
+</body>
+</html>
+
